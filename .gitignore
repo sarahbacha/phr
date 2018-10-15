@@ -11,3 +11,4 @@
 
 # fabric sdk node modules
 phr-app/node_modules/
+phr-app/client/node_modules/
