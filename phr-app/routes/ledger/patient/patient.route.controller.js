@@ -81,7 +81,6 @@ module.exports = function (app) {
       console.error('Failed to query successfully :: ' + err);
     });
   }
-
   function getPatientbyID(req, res) {
     var fabric_client = new Fabric_Client();
     var key = req.params.id
@@ -153,7 +152,6 @@ module.exports = function (app) {
       res.send("Could not locate patient")
     });
   }
-
   function updateIndication(req, res) {
     console.log("changing Patient diabetes Indication: ");
 
@@ -325,17 +323,17 @@ module.exports = function (app) {
     });
 
   }
-
   function createPatient(req, res) {
     console.log("submit recording of a patient: ");
     var patient = req.body;
     console.log(patient);
 
     var id = patient.id;
-    var firstName = patient.firstName;
-    var lastName = patient.lastName;
     var age = patient.age;
-    console.log(id, firstName, lastName, age);
+    var gender = patient.gender;
+    var percentage = patient.percentage;
+    var date = patient.date;
+    console.log(id, age, gender, percentage, date);
 
     var fabric_client = new Fabric_Client();
 
@@ -380,13 +378,13 @@ module.exports = function (app) {
       tx_id = fabric_client.newTransactionID();
       console.log("Assigning transaction_id: ", tx_id._transaction_id);
 
-      // recordPatient - requires 4 args, ID, firstName, lastName, Age, ex: args: ['1', 'Sarah', 'Bacha', 24], 
+      // recordPatient - requires 5 args, ID, gender, age, perc, date , ex: args: ['1', 'female', '24', '9', '10-10-2018'], 
       // send proposal to endorser
       const request = {
         //targets : --- letting this default to the peers assigned to the channel
         chaincodeId: 'phr-app',
         fcn: 'recordPatient',
-        args: [id, firstName, lastName, age],
+        args: [id, gender, age, percentage, date],
         chainId: 'mychannel',
         txId: tx_id
       };
@@ -394,6 +392,8 @@ module.exports = function (app) {
       return channel.sendTransactionProposal(request);
     }).then((results) => {
       var proposalResponses = results[0];
+      console.log('proposalResponses ', proposalResponses);
+      console.log('proposal ', proposal);
       var proposal = results[1];
       let isProposalGood = false;
       if (proposalResponses && proposalResponses[0].response &&
