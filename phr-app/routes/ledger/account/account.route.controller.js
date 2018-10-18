@@ -20,6 +20,7 @@ module.exports = function (app) {
     console.log(account);
 
     var id = uuidv1();
+    var role = account.role;
     var firstName = account.firstName;
     var lastName = account.lastName;
     var username = account.username;
@@ -59,10 +60,10 @@ module.exports = function (app) {
       return fabric_client.getUserContext('user1', true);
     }).then((user_from_store) => {
       if (user_from_store && user_from_store.isEnrolled()) {
-        console.log('Successfully loaded user1 from persistence');
+        console.log('Successfully loaded user from persistence');
         member_user = user_from_store;
       } else {
-        throw new Error('Failed to get user1.... run registerUser.js');
+        throw new Error('Failed to get user.... run registerUser.js');
       }
 
       // get a transaction id object based on the current user assigned to fabric client
@@ -75,7 +76,7 @@ module.exports = function (app) {
         //targets : --- letting this default to the peers assigned to the channel
         chaincodeId: 'phr-app',
         fcn: 'addAccount',
-        args: [id, firstName, lastName, username, password],
+        args: [id, role, firstName, lastName, username, password],
         chainId: 'mychannel',
         txId: tx_id
       };
@@ -227,10 +228,10 @@ module.exports = function (app) {
       return fabric_client.getUserContext('user1', true);
     }).then((user_from_store) => {
       if (user_from_store && user_from_store.isEnrolled()) {
-        console.log('Successfully loaded user1 from persistence');
+        console.log('Successfully loaded user from persistence');
         member_user = user_from_store;
       } else {
-        throw new Error('Failed to get user1.... run registerUser.js');
+        throw new Error('Failed to get user.... run registerUser.js');
       }
 
       // queryPatient - requires 1 argument, ex: args: ['4'],
