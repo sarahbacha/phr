@@ -1,39 +1,20 @@
-// SPDX-License-Identifier: Apache-2.0
-
-/*
-  Sample Chaincode based on Demonstrated Scenario
-
- This code is based on code written by the Hyperledger Fabric community.
-  Original code can be found here: https://github.com/hyperledger/fabric-samples/blob/release/chaincode/fabcar/fabcar.go
-*/
-
 package main
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	sc "github.com/hyperledger/fabric/protos/peer"
 )
 
-/* Imports
- * 4 utility libraries for handling bytes, reading and writing JSON,
- * formatting, and string manipulation
- * 2 specific Hyperledger Fabric specific libraries for Smart Contracts
- */
-
-// Define the Smart Contract structure
 type SmartContract struct {
 }
-
-/* Define Patient structure, with 6 properties.
- * Structure tags are used by encoding/json library
- */
-
 type Account struct {
 	ObjectType string `json:"docType"`
 	Id         string `json:"id"`
@@ -44,36 +25,32 @@ type Account struct {
 	Password   string `json:"password"`
 }
 type PatientGeneralInformation struct {
+	ObjectType       string `json:"docType"`
+	Id               string `json:"id"`
+	AccountId        string `json:"account"`
+	DOB              string `json:"DOB"`
+	Sex              string `json:"Sex"`
+	Race             string `json:"Race"`
+	PatientReporting string `json:"reportingid"`
+}
+type PatientReporting struct {
 	ObjectType string `json:"docType"`
-	Id         string `json:"id"`
-	AccountId  string `json:"account"`
-	DOB        string `json:"DOB"`
-	Sex        string `json:"Sex"`
-	Race       string `json:"Race"`
+	PatientId  string `json:"patient"`
+	ReporterId string `json:"reporter"`
+	Status     string `json:"status"`
 }
 type PatientDiabetesIndications struct {
-	ObjectType string `json:"docType"`
-	Id         string `json:"id"`
-	AccountId  string `json:"account"`
-	HbA1c      string `json:"HbA1c"`
-	HbA1cDate  string `json:"HbA1cDate"`
+	ObjectType       string `json:"docType"`
+	Id               string `json:"id"`
+	AccountId        string `json:"account"`
+	HbA1c            string `json:"HbA1c"`
+	HbA1cDate        string `json:"HbA1cDate"`
+	PatientReporting string `json:"reportingid"`
 }
 
-/*
- * The Init method *
- called when the Smart Contract "phr-chaincode" is instantiated by the network
- * Best practice is to have any Ledger initialization in separate function
- -- see initLedger()
-*/
 func (s *SmartContract) Init(APIstub shim.ChaincodeStubInterface) sc.Response {
 	return shim.Success(nil)
 }
-
-/*
- * The Invoke method *
- called when an application requests to run the Smart Contract "phr-chaincode"
- The app also specifies the specific smart contract function to call with args
-*/
 func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) sc.Response {
 
 	// Retrieve the requested Smart Contract function and arguments
@@ -109,15 +86,15 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) sc.Response 
 		return s.queryPatientDiabetesIndications(APIstub, args)
 	case "queryPatientDiabetesIndicationsHistory":
 		return s.queryPatientDiabetesIndicationsHistory(APIstub, args)
+	// Patient Reporting Actions
+	case "recordPatientReporting":
+		return s.recordPatientReporting(APIstub, args)
+	case "getPatientReportingAccess":
+		return s.getPatientReportingAccess(APIstub, args)
 	default:
 		return shim.Error("Invalid Smart Contract function name.")
 	}
 }
-
-/*
- * The initLedger method *
- * Will add test data (1 patient)to our network
- */
 func (s *SmartContract) initLedger(APIstub shim.ChaincodeStubInterface) sc.Response {
 	// Accounts
 	fmt.Println("PHR Is Starting Up")
@@ -168,6 +145,25 @@ func (s *SmartContract) account_add(APIstub shim.ChaincodeStubInterface, args []
 	bytes, err = json.Marshal(accounts)
 	err = APIstub.PutState("phr_accounts", bytes)
 
+	if strings.HasPrefix(args[1], "Patient") {
+		var patientReporting = PatientReporting{
+			ObjectType: "PatientReporting",
+			PatientId:  args[0],
+			ReporterId: args[0],
+			Status:     "Active",
+		}
+		reportingbytes, errreporting := json.Marshal(patientReporting)
+		patientID := args[0]
+		values := []string{}
+		values = append(values, patientID)
+		values = append(values, patientID)
+		key := strings.Join(values, "")
+		errreporting = APIstub.PutState(key, reportingbytes)
+		if errreporting != nil {
+			return shim.Error("Unable to put reporting." + errreporting.Error())
+		}
+	}
+
 	return shim.Success(nil)
 }
 func (s *SmartContract) account_read(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
@@ -205,28 +201,44 @@ func (s *SmartContract) account_read(APIstub shim.ChaincodeStubInterface, args [
 }
 
 // General Patient Transactions
+
 /*
- * The recordPatient method *
- * This method takes in five arguments (attributes to be saved in the ledger).
- */
+	Record Patient General Information
+	arguments: [id, patientID, reporterID, dob, sex, race]
+*/
 func (s *SmartContract) recordPatientGeneralInformation(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 
-	if len(args) != 5 {
-		return shim.Error("Incorrect number of arguments. Expecting 5")
+	if len(args) != 6 {
+		return shim.Error("Incorrect number of arguments. Expecting 6")
 	}
 
+	status, err := s.getPatientReportingStatus(APIstub, args)
+	if err != nil {
+		return shim.Error(err.Error())
+	}
+	if !strings.HasPrefix(status, "Active") {
+		return shim.Error(fmt.Sprintf("Transaction is refused"))
+	}
+	patientID := args[1]
+	reporterID := args[2]
+	values := []string{}
+	values = append(values, patientID)
+	values = append(values, reporterID)
+	key := strings.Join(values, "")
+
 	var patient = PatientGeneralInformation{
-		ObjectType: "PatientGeneralInformation",
-		Id:         args[0],
-		AccountId:  args[1],
-		DOB:        args[2],
-		Sex:        args[3],
-		Race:       args[4],
+		ObjectType:       "PatientGeneralInformation",
+		Id:               args[0],
+		AccountId:        args[1],
+		DOB:              args[3],
+		Sex:              args[4],
+		Race:             args[5],
+		PatientReporting: key,
 	}
 
 	patientAsBytes, _ := json.Marshal(patient)
-	err := APIstub.PutState(args[0], patientAsBytes)
-	if err != nil {
+	erro := APIstub.PutState(args[0], patientAsBytes)
+	if erro != nil {
 		return shim.Error(fmt.Sprintf("Failed to record patient general information: %s", args[0]))
 	}
 
@@ -234,14 +246,20 @@ func (s *SmartContract) recordPatientGeneralInformation(APIstub shim.ChaincodeSt
 }
 
 /*
- * The editPatientGeneralInformation method *
- * The data in the world state can be updated with who has possession.
- * This function takes in 3 arguments, patient id, new HbA1c Percentage and Date.
- */
+	Edit General Patient Information
+	arguments: [id, patientID, reporterID, dob, sex, race]
+*/
 func (s *SmartContract) editPatientGeneralInformation(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 
-	if len(args) != 5 {
-		return shim.Error("Incorrect number of arguments. Expecting 5")
+	if len(args) != 6 {
+		return shim.Error("Incorrect number of arguments. Expecting 6")
+	}
+	status, err := s.getPatientReportingStatus(APIstub, args)
+	if err != nil {
+		return shim.Error(err.Error())
+	}
+	if !strings.HasPrefix(status, "Active") {
+		return shim.Error(fmt.Sprintf("Transaction is refused"))
 	}
 
 	patientAsBytes, _ := APIstub.GetState(args[0])
@@ -252,15 +270,23 @@ func (s *SmartContract) editPatientGeneralInformation(APIstub shim.ChaincodeStub
 
 	json.Unmarshal(patientAsBytes, &patient)
 
+	patientID := args[1]
+	reporterID := args[2]
+	values := []string{}
+	values = append(values, patientID)
+	values = append(values, reporterID)
+	key := strings.Join(values, "")
+
 	patient.ObjectType = "PatientGeneralInformation"
 	patient.Id = args[0]
 	patient.AccountId = args[1]
-	patient.DOB = args[2]
-	patient.Sex = args[3]
-	patient.Race = args[4]
+	patient.DOB = args[3]
+	patient.Sex = args[4]
+	patient.Race = args[5]
+	patient.PatientReporting = key
 
 	patientAsBytes, _ = json.Marshal(patient)
-	err := APIstub.PutState(args[0], patientAsBytes)
+	err = APIstub.PutState(args[0], patientAsBytes)
 	if err != nil {
 		return shim.Error(fmt.Sprintf("Failed to edit PatientGeneralInformation ", args[0]))
 	}
@@ -269,10 +295,9 @@ func (s *SmartContract) editPatientGeneralInformation(APIstub shim.ChaincodeStub
 }
 
 /*
- * The queryPatientGeneralInformation method *
- * Used to view General Information of one particular patient
- * It takes one argument -- the key for the patient in question
- */
+	Query Patient General Information
+	arguments: [id]
+*/
 func (s *SmartContract) queryPatientGeneralInformation(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 
 	if len(args) != 1 {
@@ -287,10 +312,9 @@ func (s *SmartContract) queryPatientGeneralInformation(APIstub shim.ChaincodeStu
 }
 
 /*
- * The queryPatientGeneralInformationHistory method *
- * Used to view the General Information History of one particular patient
- * It takes one argument -- the key for the patient in question
- */
+	Query Patient General Information History
+	arguments: [id]
+*/
 func (s *SmartContract) queryPatientGeneralInformationHistory(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 
 	if len(args) != 1 {
@@ -355,25 +379,40 @@ func (s *SmartContract) queryPatientGeneralInformationHistory(APIstub shim.Chain
 
 // Diabetes Indications Transactions
 /*
- * The recordPatientDiabetesIndications method *
- * This method takes in four arguments (attributes to be saved in the ledger).
- */
+	Record Patient Diabetes Indications
+	arguments: [id, patientID, reporterID, HbA1c, HbA1cDate]
+*/
 func (s *SmartContract) recordPatientDiabetesIndications(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 
-	if len(args) != 4 {
-		return shim.Error("Incorrect number of arguments. Expecting 4")
+	if len(args) != 5 {
+		return shim.Error("Incorrect number of arguments. Expecting 5")
 	}
 
+	status, err := s.getPatientReportingStatus(APIstub, args)
+	if err != nil {
+		return shim.Error(err.Error())
+	}
+	if !strings.HasPrefix(status, "Active") {
+		return shim.Error(fmt.Sprintf("Transaction is refused"))
+	}
+	patientID := args[1]
+	reporterID := args[2]
+	values := []string{}
+	values = append(values, patientID)
+	values = append(values, reporterID)
+	key := strings.Join(values, "")
+
 	var patient = PatientDiabetesIndications{
-		ObjectType: "PatientDiabetesIndications",
-		Id:         args[0],
-		AccountId:  args[1],
-		HbA1c:      args[2],
-		HbA1cDate:  args[3],
+		ObjectType:       "PatientDiabetesIndications",
+		Id:               args[0],
+		AccountId:        args[1],
+		HbA1c:            args[3],
+		HbA1cDate:        args[4],
+		PatientReporting: key,
 	}
 
 	patientAsBytes, _ := json.Marshal(patient)
-	err := APIstub.PutState(args[0], patientAsBytes)
+	err = APIstub.PutState(args[0], patientAsBytes)
 	if err != nil {
 		return shim.Error(fmt.Sprintf("Failed to record patient diabetes indications: %s", args[0]))
 	}
@@ -382,12 +421,20 @@ func (s *SmartContract) recordPatientDiabetesIndications(APIstub shim.ChaincodeS
 }
 
 /*
- * The editPatientGeneralInformation method *
- * The data in the world state can be updated with who has possession.
- */
+	Edit Patient Diabetes Indications
+	arguments: [id, patientID, reporterID, HbA1c, HbA1cDate]
+*/
 func (s *SmartContract) editPatientDiabetesIndications(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
-	if len(args) != 4 {
-		return shim.Error("Incorrect number of arguments. Expecting 4")
+	if len(args) != 5 {
+		return shim.Error("Incorrect number of arguments. Expecting 5")
+	}
+
+	status, err := s.getPatientReportingStatus(APIstub, args)
+	if err != nil {
+		return shim.Error(err.Error())
+	}
+	if !strings.HasPrefix(status, "Active") {
+		return shim.Error(fmt.Sprintf("Transaction is refused"))
 	}
 
 	patientAsBytes, _ := APIstub.GetState(args[0])
@@ -398,14 +445,22 @@ func (s *SmartContract) editPatientDiabetesIndications(APIstub shim.ChaincodeStu
 
 	json.Unmarshal(patientAsBytes, &patient)
 
+	patientID := args[1]
+	reporterID := args[2]
+	values := []string{}
+	values = append(values, patientID)
+	values = append(values, reporterID)
+	key := strings.Join(values, "")
+
 	patient.ObjectType = "PatientDiabetesIndications"
 	patient.Id = args[0]
 	patient.AccountId = args[1]
-	patient.HbA1c = args[2]
-	patient.HbA1cDate = args[3]
+	patient.HbA1c = args[3]
+	patient.HbA1cDate = args[4]
+	patient.PatientReporting = key
 
 	patientAsBytes, _ = json.Marshal(patient)
-	err := APIstub.PutState(args[0], patientAsBytes)
+	err = APIstub.PutState(args[0], patientAsBytes)
 	if err != nil {
 		return shim.Error(fmt.Sprintf("Failed to edit PatientGeneralInformation ", args[0]))
 	}
@@ -414,10 +469,9 @@ func (s *SmartContract) editPatientDiabetesIndications(APIstub shim.ChaincodeStu
 }
 
 /*
- * The queryPatientDiabetesIndications method *
- * Used to view Diabetes Indications of one particular patient
- * It takes one argument -- the key for the patient in question
- */
+	Query Patient Diabetes Indications
+	arguments: [id]
+*/
 func (s *SmartContract) queryPatientDiabetesIndications(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 
 	if len(args) != 1 {
@@ -432,10 +486,9 @@ func (s *SmartContract) queryPatientDiabetesIndications(APIstub shim.ChaincodeSt
 }
 
 /*
- * The queryPatientDiabetesIndicationsHistory method *
- * Used to view the Diabetes Indications  History of one particular patient
- * It takes one argument -- the key for the patient in question
- */
+	Query Patient Diabetes Indications History
+	arguments: [id]
+*/
 func (s *SmartContract) queryPatientDiabetesIndicationsHistory(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 
 	if len(args) != 1 {
@@ -498,8 +551,12 @@ func (s *SmartContract) queryPatientDiabetesIndicationsHistory(APIstub shim.Chai
 	return shim.Success(buffer.Bytes())
 }
 
+// Patient Actions
+/*
+	Query Patient
+	arguments: [patientID]
+*/
 func (s *SmartContract) queryPatientByAccount(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
-
 	if len(args) < 1 {
 		return shim.Error("Incorrect number of arguments. Expecting 1")
 	}
@@ -515,10 +572,76 @@ func (s *SmartContract) queryPatientByAccount(APIstub shim.ChaincodeStubInterfac
 	return shim.Success(queryResults)
 }
 
-// =========================================================================================
-// getQueryResultForQueryString executes the passed in query string.
-// Result set is built and returned as a byte array containing the JSON results.
-// =========================================================================================
+// Patient Reporting Action
+func (s *SmartContract) getPatientReportingStatus(APIstub shim.ChaincodeStubInterface, args []string) (string, error) {
+
+	patientID := args[1]
+	reporterID := args[2]
+
+	values := []string{}
+	values = append(values, patientID)
+	values = append(values, reporterID)
+	key := strings.Join(values, "")
+	PatientReportingAsBytes, err := APIstub.GetState(key)
+	if err != nil {
+		return "", errors.New("Could not locate PatientReportingAsBytes")
+	}
+	var PatientReporting PatientReporting
+	err = json.Unmarshal(PatientReportingAsBytes, &PatientReporting)
+	role := PatientReporting.Status
+	return role, nil
+}
+
+/*
+	Record Patient Reporting
+	arguments: [PatientId, ReporterID, Status]
+*/
+func (s *SmartContract) recordPatientReporting(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+
+	if len(args) != 3 {
+		return shim.Error("Incorrect number of arguments. Expecting 3")
+	}
+
+	var patientReporting = PatientReporting{
+		ObjectType: "PatientReporting",
+		PatientId:  args[0],
+		ReporterId: args[1],
+		Status:     args[2],
+	}
+	values := []string{}
+	values = append(values, args[0])
+	values = append(values, args[1])
+	key := strings.Join(values, "")
+
+	patientReportingAsBytes, _ := json.Marshal(patientReporting)
+	err := APIstub.PutState(key, patientReportingAsBytes)
+	if err != nil {
+		return shim.Error(fmt.Sprintf("Failed to record patient reporting: %s", key))
+	}
+
+	return shim.Success(nil)
+}
+
+/*
+	Query Patient Reporting Statuses
+	arguments: [PatientId]
+*/
+func (s *SmartContract) getPatientReportingAccess(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+
+	if len(args) < 1 {
+		return shim.Error("Incorrect number of arguments. Expecting 1")
+	}
+
+	patientID := args[0]
+	queryString := fmt.Sprintf("{\"selector\": {\"docType\": {\"$eq\": \"PatientReporting\"},\"patient\": { \"$eq\": \"%s\" }}}", patientID)
+
+	queryResults, err := getQueryResultForQueryString(APIstub, queryString)
+	if err != nil {
+		return shim.Error(err.Error())
+	}
+	return shim.Success(queryResults)
+}
+
 func getQueryResultForQueryString(APIstub shim.ChaincodeStubInterface, queryString string) ([]byte, error) {
 
 	fmt.Printf("- getQueryResultForQueryString queryString:\n%s\n", queryString)
@@ -538,7 +661,6 @@ func getQueryResultForQueryString(APIstub shim.ChaincodeStubInterface, queryStri
 
 	return buffer.Bytes(), nil
 }
-
 func constructQueryResponseFromIterator(resultsIterator shim.StateQueryIteratorInterface) (*bytes.Buffer, error) {
 	// buffer is a JSON array containing QueryResults
 	var buffer bytes.Buffer
@@ -570,11 +692,6 @@ func constructQueryResponseFromIterator(resultsIterator shim.StateQueryIteratorI
 	return &buffer, nil
 }
 
-/*
- * main function *
-	*calls the Start function
-	*The main function starts the chaincode in the container during instantiation.
-*/
 func main() {
 
 	// Create a new Smart Contract

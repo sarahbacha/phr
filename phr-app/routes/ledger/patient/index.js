@@ -5,6 +5,9 @@ module.exports = function (app) {
   var controller = require('./patient.route.controller.js')(app);
   router.get('/:id', controller.getPatientbyID);
 
+  router.get('/access/:id', controller.getPatientAccess);
+  router.post('/access', controller.givePatientAccess);
+
   router.get('/general/:id', controller.getPatientGeneralInformation);
   router.post('/general', controller.createPatientGeneralInformation);
   router.patch('/general/:id', controller.updatePatientGeneralInformation);
